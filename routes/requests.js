@@ -1,20 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
-const { authenticate } = require('../middleware/auth'); // Correct import
+const { authenticate } = require('../middleware/auth');
 
 // Create a new cab request
 router.post('/', authenticate('user'), async (req, res) => {
     try {
-        const { pickupLocation, dropoffLocation, rideType, requestTime } = req.body;
-        const userId = req.user.id; // Get from authenticated user
+        const { pickupLocation, dropoffLocation, requestTime } = req.body;
+        const userId = req.user.id;
 
         const result = await pool.query(
             `INSERT INTO cab_requests 
-             (user_id, pickup_location, dropoff_location, ride_type, request_time, status) 
-             VALUES ($1, $2, $3, $4, $5, 'PENDING') 
+             (user_id, pickup_location, dropoff_location, request_time, status) 
+             VALUES ($1, $2, $3, $4, 'PENDING') 
              RETURNING *`,
-            [userId, pickupLocation, dropoffLocation, rideType, requestTime || new Date()]
+            [userId, pickupLocation, dropoffLocation, requestTime || new Date()]
         );
 
         res.status(201).json({
@@ -30,7 +30,7 @@ router.post('/', authenticate('user'), async (req, res) => {
     }
 });
 
-// Get user's cab requests (updated)
+// Get user's cab requests
 router.get('/', authenticate('user'), async (req, res) => {
     try {
         const userId = req.user.id;
@@ -39,10 +39,11 @@ router.get('/', authenticate('user'), async (req, res) => {
             `SELECT cr.*, 
                     d.id as driver_id, 
                     d.name as driver_name,
-                    d.vehicle_type,
-                    d.vehicle_number
+                    d.phone as driver_phone,
+                    u.phone as user_phone
              FROM cab_requests cr
              LEFT JOIN drivers d ON cr.driver_id = d.id
+             JOIN users u ON cr.user_id = u.id
              WHERE cr.user_id = $1
              ORDER BY cr.request_time DESC`,
             [userId]
@@ -54,14 +55,13 @@ router.get('/', authenticate('user'), async (req, res) => {
                 id: row.id,
                 pickup_location: row.pickup_location,
                 dropoff_location: row.dropoff_location,
-                ride_type: row.ride_type,
                 request_time: row.request_time,
                 status: row.status,
+                user_phone: row.user_phone || 'Not available',
                 driver: row.driver_id ? {
                     id: row.driver_id,
                     name: row.driver_name,
-                    vehicle_type: row.vehicle_type,
-                    vehicle_number: row.vehicle_number
+                    phone: row.driver_phone || 'Not available'
                 } : null
             }))
         });
@@ -74,13 +74,15 @@ router.get('/', authenticate('user'), async (req, res) => {
     }
 });
 
-// Get all requests for admin (new route)
+// Get all requests for admin
 router.get('/all', authenticate('admin'), async (req, res) => {
     try {
         const result = await pool.query(
             `SELECT cr.*, 
                     u.username as user_name,
-                    d.name as driver_name
+                    u.phone as user_phone,
+                    d.name as driver_name,
+                    d.phone as driver_phone
              FROM cab_requests cr
              JOIN users u ON cr.user_id = u.id
              LEFT JOIN drivers d ON cr.driver_id = d.id
@@ -89,7 +91,18 @@ router.get('/all', authenticate('admin'), async (req, res) => {
 
         res.json({
             success: true,
-            data: result.rows
+            data: result.rows.map(row => ({
+                id: row.id,
+                pickup_location: row.pickup_location,
+                dropoff_location: row.dropoff_location,
+                request_time: row.request_time,
+                status: row.status,
+                user_phone: row.user_phone || 'Not available',
+                driver: row.driver_id ? {
+                    name: row.driver_name,
+                    phone: row.driver_phone || 'Not available'
+                } : null
+            }))
         });
     } catch (error) {
         console.error('Error fetching all requests:', error);
@@ -100,7 +113,7 @@ router.get('/all', authenticate('admin'), async (req, res) => {
     }
 });
 
-// Assign driver to request (new route)
+// Assign driver to request
 router.put('/:id/assign', authenticate('admin'), async (req, res) => {
     try {
         const { driverId } = req.body;
@@ -140,5 +153,4 @@ router.put('/:id/assign', authenticate('admin'), async (req, res) => {
     }
 });
 
-
-module.exports = router;
+module.exports = router;    //    request.js     //routes
