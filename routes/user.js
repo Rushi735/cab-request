@@ -19,18 +19,24 @@ const authMiddleware = (req, res, next) => {
         res.status(401).json({ message: 'Invalid token' });
     }
 };
-
 router.post('/register', async (req, res) => {
-    const { username, email, password } = req.body;
+    const { username, email, password, phone } = req.body;
     try {
+        // Check if user exists by email
         const userExists = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
         if (userExists.rows.length > 0) {
             return res.status(400).json({ message: 'User already exists' });
         }
+
+        // Basic phone number validation (server-side)
+        if (!phone_number || !/^\+?\d{10,15}$/.test(phone.replace(/[\s-]/g, ''))) {
+            return res.status(400).json({ message: 'Invalid phone number' });
+        }
+
         const hashedPassword = await bcrypt.hash(password, 10);
         const result = await pool.query(
-            'INSERT INTO users (username, email, password) VALUES ($1, $2, $3) RETURNING id',
-            [username, email, hashedPassword]
+            'INSERT INTO users (username, email, password, phone) VALUES ($1, $2, $3, $4) RETURNING id',
+            [username, email, hashedPassword, phone_number]
         );
         res.status(201).json({ message: 'User registered', userId: result.rows[0].id });
     } catch (error) {
