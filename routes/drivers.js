@@ -202,7 +202,7 @@ router.get('/assigned-requests', verifyToken, async (req, res) => {
                 cr.created_at,
                 cr.request_time,
                 cr.fare_amount,
-                u.username AS customer_name,
+                u.name AS customer_name,
                 u.phone AS customer_phone,
                 u.email AS customer_email
              FROM cab_requests cr
@@ -222,8 +222,13 @@ router.get('/assigned-requests', verifyToken, async (req, res) => {
         // Format the data for better frontend display
         const requests = result.rows.map(request => ({
             ...request,
-            formatted_date: new Date(request.request_time || request.created_at).toLocaleString(),
-            status_display: request.status.replace('_', ' ').toUpperCase()
+            formatted_date: new Date(request.request_time || request.created_at).toLocaleString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            }),
+            status_display: request.status.replace('_', ' ')
         }));
 
         res.json({
@@ -290,124 +295,6 @@ router.post('/complete-request', verifyToken, async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Failed to complete request',
-            error: error.message
-        });
-    }
-});
-
-// RECENT REQUESTS ENDPOINT
-router.get('/recent-requests', verifyToken, async (req, res) => {
-    try {
-        const result = await pool.query(
-            `SELECT 
-                cr.id, 
-                cr.pickup_location, 
-                cr.dropoff_location, 
-                cr.status,
-                cr.request_time,
-                u.username AS customer_name
-             FROM cab_requests cr
-             JOIN users u ON cr.user_id = u.id
-             WHERE cr.status = 'pending' 
-             AND cr.vehicle_type = $1
-             AND cr.driver_id IS NULL
-             ORDER BY cr.created_at DESC
-             LIMIT 10`,
-            [req.vehicleType]
-        );
-
-        res.json({
-            success: true,
-            requests: result.rows
-        });
-
-    } catch (error) {
-        console.error('Recent requests error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to fetch recent requests',
-            error: error.message
-        });
-    }
-});
-
-// PAST RIDES ENDPOINT
-router.get('/past-rides', verifyToken, async (req, res) => {
-    try {
-        const result = await pool.query(
-            `SELECT 
-                cr.id, 
-                cr.pickup_location, 
-                cr.dropoff_location, 
-                cr.fare_amount,
-                cr.request_time,
-                u.username AS customer_name
-             FROM cab_requests cr
-             JOIN users u ON cr.user_id = u.id
-             WHERE cr.driver_id = $1
-             AND cr.status = 'completed'
-             ORDER BY cr.completed_at DESC
-             LIMIT 10`,
-            [req.driverId]
-        );
-
-        res.json({
-            success: true,
-            rides: result.rows
-        });
-
-    } catch (error) {
-        console.error('Past rides error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to fetch past rides',
-            error: error.message
-        });
-    }
-});
-
-// ACCEPT REQUEST ENDPOINT
-router.post('/accept-request', verifyToken, async (req, res) => {
-    try {
-        const { requestId } = req.body;
-
-        // Check if request exists and is available
-        const requestCheck = await pool.query(
-            `SELECT id FROM cab_requests 
-             WHERE id = $1 
-             AND status = 'pending' 
-             AND driver_id IS NULL`,
-            [requestId]
-        );
-
-        if (requestCheck.rows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Request not available or already assigned'
-            });
-        }
-
-        // Assign request to driver
-        await pool.query(
-            `UPDATE cab_requests 
-             SET driver_id = $1, 
-                 status = 'accepted', 
-                 accepted_at = NOW(),
-                 updated_at = NOW()
-             WHERE id = $2`,
-            [req.driverId, requestId]
-        );
-
-        res.json({
-            success: true,
-            message: 'Request accepted successfully'
-        });
-
-    } catch (error) {
-        console.error('Accept request error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to accept request',
             error: error.message
         });
     }
