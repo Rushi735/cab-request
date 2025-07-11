@@ -1,20 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
-const { authenticate } = require('../middleware/auth'); // Correct import
+const { authenticate } = require('../middleware/auth');
 
 // Create a new cab request
 router.post('/', authenticate('user'), async (req, res) => {
     try {
-        const { pickupLocation, dropoffLocation, rideType, requestTime } = req.body;
-        const userId = req.user.id; // Get from authenticated user
+        const { pickupLocation, dropoffLocation, requestTime } = req.body;
+        const userId = req.user.id;
 
         const result = await pool.query(
             `INSERT INTO cab_requests 
-             (user_id, pickup_location, dropoff_location, ride_type, request_time, status) 
-             VALUES ($1, $2, $3, $4, $5, 'PENDING') 
+             (user_id, pickup_location, dropoff_location, request_time, status) 
+             VALUES ($1, $2, $3, $4, 'PENDING') 
              RETURNING *`,
-            [userId, pickupLocation, dropoffLocation, rideType, requestTime || new Date()]
+            [userId, pickupLocation, dropoffLocation, requestTime || new Date()]
         );
 
         res.status(201).json({
@@ -30,7 +30,7 @@ router.post('/', authenticate('user'), async (req, res) => {
     }
 });
 
-// Get user's cab requests (updated)
+// Get user's cab requests
 router.get('/', authenticate('user'), async (req, res) => {
     try {
         const userId = req.user.id;
@@ -40,7 +40,10 @@ router.get('/', authenticate('user'), async (req, res) => {
                     d.id as driver_id, 
                     d.name as driver_name,
                     d.vehicle_type,
-                    d.vehicle_number
+                    d.vehicle_number,
+                    d.phone,
+                    d.current_latitude as latitude,
+                    d.current_longitude as longitude
              FROM cab_requests cr
              LEFT JOIN drivers d ON cr.driver_id = d.id
              WHERE cr.user_id = $1
@@ -54,14 +57,17 @@ router.get('/', authenticate('user'), async (req, res) => {
                 id: row.id,
                 pickup_location: row.pickup_location,
                 dropoff_location: row.dropoff_location,
-                ride_type: row.ride_type,
                 request_time: row.request_time,
                 status: row.status,
+                fare_amount: row.fare_amount,
                 driver: row.driver_id ? {
                     id: row.driver_id,
                     name: row.driver_name,
                     vehicle_type: row.vehicle_type,
-                    vehicle_number: row.vehicle_number
+                    vehicle_number: row.vehicle_number,
+                    phone: row.phone,
+                    latitude: row.latitude,
+                    longitude: row.longitude
                 } : null
             }))
         });
@@ -74,13 +80,16 @@ router.get('/', authenticate('user'), async (req, res) => {
     }
 });
 
-// Get all requests for admin (new route)
+// Get all requests for admin
 router.get('/all', authenticate('admin'), async (req, res) => {
     try {
         const result = await pool.query(
             `SELECT cr.*, 
                     u.username as user_name,
-                    d.name as driver_name
+                    d.name as driver_name,
+                    d.phone,
+                    d.current_latitude as latitude,
+                    d.current_longitude as longitude
              FROM cab_requests cr
              JOIN users u ON cr.user_id = u.id
              LEFT JOIN drivers d ON cr.driver_id = d.id
@@ -100,7 +109,7 @@ router.get('/all', authenticate('admin'), async (req, res) => {
     }
 });
 
-// Assign driver to request (new route)
+// Assign driver to request
 router.put('/:id/assign', authenticate('admin'), async (req, res) => {
     try {
         const { driverId } = req.body;
@@ -109,26 +118,40 @@ router.put('/:id/assign', authenticate('admin'), async (req, res) => {
         await pool.query('BEGIN');
 
         // Assign driver
-        await pool.query(
+        const result = await pool.query(
             `UPDATE cab_requests 
              SET driver_id = $1, status = 'ASSIGNED' 
-             WHERE id = $2 RETURNING *`,
+             WHERE id = $2 
+             RETURNING *`,
             [driverId, requestId]
         );
 
-        // Mark driver as unavailable
-        await pool.query(
-            `UPDATE drivers 
-             SET available = false 
+        // Fetch driver details to include in response
+        const driverResult = await pool.query(
+            `SELECT id, name, vehicle_type, vehicle_number, phone, current_latitude as latitude, current_longitude as longitude 
+             FROM drivers 
              WHERE id = $1`,
             [driverId]
         );
 
         await pool.query('COMMIT');
 
+        const request = result.rows[0];
         res.json({
             success: true,
-            message: 'Driver assigned successfully'
+            message: 'Driver assigned successfully',
+            data: {
+                ...request,
+                driver: driverResult.rows[0] ? {
+                    id: driverResult.rows[0].id,
+                    name: driverResult.rows[0].name,
+                    vehicle_type: driverResult.rows[0].vehicle_type,
+                    vehicle_number: driverResult.rows[0].vehicle_number,
+                    phone: driverResult.rows[0].phone,
+                    latitude: driverResult.rows[0].latitude,
+                    longitude: driverResult.rows[0].longitude
+                } : null
+            }
         });
     } catch (error) {
         await pool.query('ROLLBACK');
@@ -139,6 +162,5 @@ router.put('/:id/assign', authenticate('admin'), async (req, res) => {
         });
     }
 });
-
 
 module.exports = router;
